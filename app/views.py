@@ -1,3 +1,6 @@
+import os
+from operator import itemgetter
+
 from django.views.generic import FormView
 
 from . import s3
@@ -16,29 +19,28 @@ class FileBrowser(FormView):
         root = self.request.GET.get('root', '')
         objects = s3.get_objects()
 
-        keys = [obj['Key'] for obj in objects['Contents']]
+        keys = list(map(itemgetter('Key'), objects['Contents']))
 
         objects_to_show = []
 
         keys = filter(lambda x: x.startswith(root), keys)
         keys_in_root_dir = list(map(lambda x: x.replace(root, '').strip('/'), keys))
-        # keys_in_root_dir = list(filter(lambda x: x.count('/') or x.count('.'), keys_in_root_dir))
 
-        dirs = {key.split('/', 1)[0] for key in keys_in_root_dir if key.count('/')}
+        dirs = {key.split('/', 1)[0] for key in keys_in_root_dir if '/' in key}
 
         # Update dirs with empty folders
-        dirs.update({key for key in keys_in_root_dir if not key.count('/') and not key.count('.')})
+        dirs.update({key for key in keys_in_root_dir if not '/' in key and not '.' in key})
 
-        # Remove from dirs folders with no name (like, '')
+        # Remove from dirs folders with no name (like '')
         dirs = list(filter(lambda x: x, dirs))
 
-        files = [key for key in keys_in_root_dir if not key.count('/') and key.count('.')]
+        files = [key for key in keys_in_root_dir if not '/' in key and '.' in key]
 
         for d in dirs:
             objects_to_show.append({
                 'name': d,
                 'dir': True,
-                'dir_link': root + d,
+                'dir_link': os.path.join(root, d),
                 'edit_link': None
             })
 
@@ -49,7 +51,7 @@ class FileBrowser(FormView):
                 'dir_link': None,
                 'edit_link': None,
                 'obj_link': 'https://console.aws.amazon.com/s3/buckets/{}/{}/details?region=us-east-1&tab=overview'.format(
-                    s3.bucket_name, root + f)
+                    s3.bucket_name, os.path.join(root, f))
             })
 
         context['objects'] = objects_to_show
@@ -68,8 +70,9 @@ class FileBrowser(FormView):
         form = self.get_form()
         if form.is_valid():
             for file in request.FILES.getlist('files'):
-                data, key = file, root + file.name
+                data, key = file, os.path.join(root, file.name)
                 s3.upload_object(data, key)
 
         s3.update_objects()
         return super(FileBrowser, self).get(request, *args, **kwargs)
+
